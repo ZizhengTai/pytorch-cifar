@@ -57,7 +57,7 @@ if args.resume:
     assert os.path.isdir('checkpoint'), 'Error: no checkpoint directory found!'
     checkpoint = torch.load('./checkpoint/ckpt.t7')
     net = checkpoint['net']
-    best_acc = checkpoint['acc']
+    best_acc = checkpoint['best_acc']
     start_epoch = checkpoint['epoch'] + 1
 else:
     print('==> Building model..')
@@ -128,17 +128,17 @@ def test(epoch):
 
     # Save checkpoint.
     acc = 100.*correct/total
-    if acc > best_acc:
-        print('Saving..')
-        state = {
-            'net': net.module if use_cuda else net,
-            'acc': acc,
-            'epoch': epoch,
-        }
-        if not os.path.isdir('checkpoint'):
-            os.mkdir('checkpoint')
-        torch.save(state, './checkpoint/ckpt.t7')
-        best_acc = acc
+    best_acc = max(best_acc, acc)
+
+    print('Saving..')
+    state = {
+        'net': net.module if use_cuda else net,
+        'best_acc': best_acc,
+        'epoch': epoch,
+    }
+    if not os.path.isdir('checkpoint'):
+        os.mkdir('checkpoint')
+    torch.save(state, './checkpoint/ckpt.t7')
 
 
 for epoch in range(start_epoch, start_epoch + args.n_epochs):
