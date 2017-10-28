@@ -58,7 +58,7 @@ if args.resume:
     checkpoint = torch.load('./checkpoint/ckpt.t7')
     net = checkpoint['net']
     best_acc = checkpoint['acc']
-    start_epoch = checkpoint['epoch']
+    start_epoch = checkpoint['epoch'] + 1
 else:
     print('==> Building model..')
     # net = VGG('VGG19')
