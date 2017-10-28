@@ -133,7 +133,7 @@ def test(epoch):
     # Save checkpoint.
     acc = 100.*correct/total
     best_acc = max(best_acc, acc)
-    print('Best acc: {0.3f}%'.format(best_acc))
+    print('Best acc: {0:.3f}%'.format(best_acc))
 
     print('Saving..')
     state = {
