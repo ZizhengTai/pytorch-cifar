@@ -1,11 +1,14 @@
+import numpy as np
 import torch
+from torch.autograd import Variable
 import torch.backends.cudnn as cudnn
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.optim as optim
-from torch.autograd import Variable
+from torch.optim import SGD
+from torch.optim.lr_scheduler import StepLR
 import torchvision
 import torchvision.transforms as transforms
+from tqdm import tqdm, trange
 
 
 class Shift3x3(nn.Module):
@@ -34,42 +37,62 @@ def make_shift_conv(conv):
     '''
     Given a conv3x3 layer, returns a (shift3x3, conv1x1) tuple.
     '''
-    shift = Shift3x3(conv.out_channels)
-    conv = nn.Conv2d(conv.in_channels, conv.out_channels, 1, bias=False)
+    shift = Shift3x3(conv.in_channels)
+    conv = nn.Conv2d(conv.out_channels, conv.in_channels, 1, bias=False)
     return shift, conv
 
 
-def make_forward_hook(shift_conv):
+def make_forward_hook(shift, conv, rel_losses, index):
     '''
-    Given a (shift3x3, conv1x1) tuple, returns a forward hook
-    that can be registered on the original conv3x3 layer to train
-    the conv1x1 layer.
+    Given a shift3x3 and a conv1x1, returns a forward hook that can be
+    registered on the original conv3x3 layer to train the conv1x1 layer.
     '''
     critierion = nn.MSELoss()
-    optimizer = optim.SGD(shift_conv[1].parameters(), lr=0.01,
-                          momentum=0.9, weight_decay=5e-4)
+    optimizer = SGD(conv.parameters(), lr=0.1, momentum=0.9, weight_decay=5e-4)
+    scheduler = StepLR(optimizer, step_size=30, gamma=0.1)
 
     def hook(module, input, target):
         optimizer.zero_grad()
 
-        print(input[0].size())
-        print(module.in_channels, module.out_channels)
-        output = shift_conv[1](shift_conv[0](input[0]))
+        output = conv(shift(input[0]))
         loss = critierion(output, target)
+
+        rel_loss = (np.prod(target.size()) * loss.data[0] /
+                    (target.norm() ** 2).data[0])
+        rel_losses[index] = rel_loss
 
         loss.backward()
         optimizer.step()
 
-    return hook
+    return hook, scheduler
 
 
-def train(net, train_loader):
+def train(net, train_loader, conv1x1_losses, schedulers):
     '''
     Feed data through the network for one epoch.
     '''
-    for input, _ in train_loader:
-        input = Variable(input.cuda(), volatile=True)
+    # Adjust learning rate
+    for scheduler in schedulers:
+        scheduler.step()
+
+    t = tqdm(train_loader)
+    for input, _ in t:
+        input = Variable(input.cuda())
         net(input)
+
+        losses = np.array(conv1x1_losses)
+        t.set_description('avg: {0:.3e} | min: {1:.3e} | max: {2:.3e}'.format(
+            losses.mean(), losses.min(), losses.max()))
+
+
+def save_losses(losses, filename):
+    with open(filename, 'a') as f:
+        f.write(','.join(map(str, losses)))
+        f.write('\n')
+
+
+def save_modules(modules, filename):
+    torch.save(modules, filename)
 
 
 def main():
@@ -88,14 +111,25 @@ def main():
 
     # Create a (shift3x3, conv1x1) tuple for each conv3x3 layer,
     # and register forward hook to train the conv1x1
-    shift_convs = []
+    conv1x1_modules = []
+    conv1x1_losses = []
+    schedulers = []
     for mod in net.modules():
-        if isinstance(mod, nn.Conv2d) and mod.kernel_size == (3, 3):
-            shift_conv = make_shift_conv(mod)
-            shift_convs.append(shift_conv)
+        if (isinstance(mod, nn.Conv2d) and
+            mod.kernel_size == (3, 3) and
+            mod.in_channels > 9 and
+            mod.stride == (1, 1)):
 
-            hook = make_forward_hook(shift_conv)
+            # Create shift3x3 and conv1x1 on GPU
+            shift3x3, conv1x1 = make_shift_conv(mod)
+            shift3x3, conv1x1 = shift3x3.cuda(), conv1x1.cuda()
+            conv1x1_modules.append(conv1x1)
+            conv1x1_losses.append(0)
+
+            hook, scheduler = make_forward_hook(
+                    shift3x3, conv1x1, conv1x1_losses, len(conv1x1_losses) - 1)
             mod.register_forward_hook(hook)
+            schedulers.append(scheduler)
 
     # Prepare data
     transform_train = transforms.Compose([
@@ -111,9 +145,16 @@ def main():
                                                shuffle=True, num_workers=2)
 
     # Train
-    for epoch in range(10):
-        print('Epoch {0}'.format(epoch))
-        train(net, train_loader)
+    n_epochs = 100
+    for epoch in range(n_epochs):
+        print('Epoch {0}/{1}'.format(epoch, n_epochs))
+
+        train(net, train_loader, conv1x1_losses, schedulers)
+
+        print('Saving...')
+        save_modules(conv1x1_modules, 'modules.t7')
+        save_losses(conv1x1_losses, 'losses.csv')
+        print()
 
 
 if __name__ == '__main__':
