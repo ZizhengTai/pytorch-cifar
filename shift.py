@@ -8,7 +8,7 @@ from torch.optim import SGD
 from torch.optim.lr_scheduler import StepLR
 import torchvision
 import torchvision.transforms as transforms
-from tqdm import tqdm, trange
+from tqdm import tqdm
 
 
 class Shift3x3(nn.Module):
