@@ -111,7 +111,7 @@ def main():
 
     # Create a (shift3x3, conv1x1) tuple for each conv3x3 layer,
     # and register forward hook to train the conv1x1
-    conv1x1_modules = []
+    modules = []
     conv1x1_losses = []
     schedulers = []
     for mod in net.modules():
@@ -123,7 +123,7 @@ def main():
             # Create shift3x3 and conv1x1 on GPU
             shift3x3, conv1x1 = make_shift_conv(mod)
             shift3x3, conv1x1 = shift3x3.cuda(), conv1x1.cuda()
-            conv1x1_modules.append(conv1x1)
+            modules.append(nn.Sequential(shift3x3, conv1x1))
             conv1x1_losses.append(0)
 
             hook, scheduler = make_forward_hook(
@@ -152,8 +152,8 @@ def main():
         train(net, train_loader, conv1x1_losses, schedulers)
 
         print('Saving...')
-        save_modules(conv1x1_modules, 'modules.t7')
-        save_losses(conv1x1_losses, 'losses.csv')
+        save_modules(modules, 'saves/modules.pth')
+        save_losses(conv1x1_losses, 'saves/losses.csv')
         print()
 
 
